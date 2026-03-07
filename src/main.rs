@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::Parser;
+use console::style;
 use std::process::Command;
 
 #[derive(Parser)]
@@ -20,6 +21,10 @@ struct Cli {
     /// Preview suggestions without committing
     #[arg(short, long)]
     dry_run: bool,
+
+    /// Print time taken for AI generation
+    #[arg(short, long)]
+    timing: bool,
 }
 
 fn get_staged_diff() -> Result<String> {
@@ -188,7 +193,11 @@ fn run(cli: Cli) -> Result<()> {
     let commits = get_recent_commits()?;
 
     eprintln!("Generating {} commit messages with Claude ({})...", cli.count, cli.model);
+    let start = std::time::Instant::now();
     let messages = generate_commit_messages(&diff, &commits, &cli.model, cli.count)?;
+    if cli.timing {
+        eprintln!("AI generation took {:.2}s", start.elapsed().as_secs_f64());
+    }
 
     if cli.dry_run {
         println!("Suggested commit messages:");
@@ -207,7 +216,7 @@ fn run(cli: Cli) -> Result<()> {
 fn main() {
     let cli = Cli::parse();
     if let Err(e) = run(cli) {
-        eprintln!("Error: {e:#}");
+        eprintln!("{} {e:#}", style("Error:").red().bold());
         std::process::exit(1);
     }
 }
