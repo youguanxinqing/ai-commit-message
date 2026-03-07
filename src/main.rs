@@ -6,7 +6,7 @@ use std::process::Command;
 
 #[derive(Parser)]
 #[command(
-    name = "git-commit-message",
+    name = "ai-commit-message",
     about = "Generate conventional commit messages using Claude AI",
     version
 )]
