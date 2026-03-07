@@ -270,7 +270,6 @@ fn generate_via_http(
                     if first_elapsed.is_none() {
                         first_elapsed = Some(start.elapsed());
                     }
-                    eprintln!("  {}", style(&msg).cyan());
                     messages.push(msg);
                 }
             }
@@ -283,7 +282,6 @@ fn generate_via_http(
         if first_elapsed.is_none() {
             first_elapsed = Some(start.elapsed());
         }
-        eprintln!("  {}", style(&tail).cyan());
         messages.push(tail);
     }
 
@@ -351,13 +349,10 @@ fn run(cli: Cli) -> Result<()> {
     eprintln!();
 
     if cli.dry_run {
-        // HTTP mode already streamed messages above; CLI mode needs explicit print
-        if !cli.http {
-            for (i, msg) in messages.iter().enumerate() {
-                eprintln!("  {}. {}", i + 1, style(msg).cyan());
-            }
-            eprintln!();
+        for (i, msg) in messages.iter().enumerate() {
+            eprintln!("  {}. {}", i + 1, style(msg).cyan());
         }
+        eprintln!();
         return Ok(());
     }
 
