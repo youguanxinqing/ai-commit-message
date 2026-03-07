@@ -31,6 +31,10 @@ struct Cli {
     /// Requires ANTHROPIC_API_KEY; ANTHROPIC_BASE_URL defaults to https://api.anthropic.com
     #[arg(long)]
     http: bool,
+
+    /// Print the prompt sent to the AI
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 fn resolve_model(name: &str) -> &str {
@@ -140,6 +144,49 @@ scenarios than include a lot of overlap.
 
 Write your {count} commit messages below in the format shown in Output Template section above."#
     )
+}
+
+fn print_verbose(prompt: &str) {
+    let width = console::Term::stderr()
+        .size()
+        .1
+        .max(60)
+        .min(100) as usize;
+    let divider = style("─".repeat(width)).dim();
+
+    eprintln!();
+    eprintln!("{divider}");
+    eprintln!(
+        "  {}  {}",
+        style("PROMPT").bold().yellow(),
+        style(format!("· {} chars", prompt.len())).dim()
+    );
+    eprintln!("{divider}");
+    eprintln!();
+
+    let mut in_code_block = false;
+    for line in prompt.lines() {
+        if line.starts_with("```") {
+            in_code_block = !in_code_block;
+            eprintln!("  {}", style(line).dim());
+            continue;
+        }
+        if in_code_block {
+            eprintln!("  {}", style(line).green());
+        } else if line.starts_with("**") {
+            eprintln!("  {}", style(line).bold().cyan());
+        } else if line.starts_with("- ") {
+            eprintln!("  {}", style(line).dim());
+        } else if line.trim().is_empty() {
+            eprintln!();
+        } else {
+            eprintln!("  {}", style(line).dim());
+        }
+    }
+
+    eprintln!();
+    eprintln!("{divider}");
+    eprintln!();
 }
 
 fn strip_numbering(messages: Vec<String>, count: u8) -> Result<Vec<String>> {
@@ -337,12 +384,18 @@ fn run(cli: Cli) -> Result<()> {
             cli.count,
             resolve_model(&cli.model)
         );
+        if cli.verbose {
+            print_verbose(&build_prompt(&diff, &commits, cli.count));
+        }
         generate_via_http(&diff, &commits, &cli.model, cli.count, cli.timing)?
     } else {
         eprintln!(
             "Generating {} commit messages via claude CLI ({})...",
             cli.count, cli.model
         );
+        if cli.verbose {
+            print_verbose(&build_prompt(&diff, &commits, cli.count));
+        }
         generate_via_cli(&diff, &commits, &cli.model, cli.count, cli.timing)?
     };
 
