@@ -145,7 +145,6 @@ fn parse_messages(text: &str, count: u8) -> Result<Vec<String>> {
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
         .map(|l| {
-            // Strip leading "N. " or "N) " numbering
             if let Some(pos) = l.find(". ").or_else(|| l.find(") ")) {
                 let prefix = &l[..pos];
                 if prefix.chars().all(|c| c.is_ascii_digit()) {
