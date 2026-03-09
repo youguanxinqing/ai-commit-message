@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
-use console::style;
+use dialoguer::console::{Key, Term, measure_text_width, style};
 use std::io::{BufRead, BufReader};
 use std::process::Command;
 
@@ -35,6 +35,12 @@ struct Cli {
     /// Print the prompt sent to the AI
     #[arg(short, long)]
     verbose: bool,
+}
+
+enum Selection {
+    Picked(String),
+    Feedback(String),
+    Cancelled,
 }
 
 fn resolve_model(name: &str) -> &str {
@@ -147,11 +153,7 @@ Write your {count} commit messages below in the format shown in Output Template 
 }
 
 fn print_verbose(prompt: &str) {
-    let width = console::Term::stderr()
-        .size()
-        .1
-        .max(60)
-        .min(100) as usize;
+    let width = Term::stderr().size().1.max(60).min(100) as usize;
     let divider = style("─".repeat(width)).dim();
 
     eprintln!();
@@ -189,6 +191,114 @@ fn print_verbose(prompt: &str) {
     eprintln!();
 }
 
+fn read_feedback_line(term: &Term) -> Result<String> {
+    const PREFIX: &str = "  > ";
+
+    // We must calculate terminal rows by display width (CJK can be width 2), not bytes/chars.
+    fn rendered_rows(term: &Term, chars: &[char]) -> usize {
+        let width = term.size().1.max(1) as usize;
+        let mut columns = measure_text_width(PREFIX);
+        for ch in chars {
+            columns += measure_text_width(&ch.to_string()).max(1);
+        }
+        let columns = columns.max(1);
+        ((columns - 1) / width) + 1
+    }
+
+    fn redraw_feedback_line(term: &Term, chars: &[char], old_rows: &mut usize) -> Result<()> {
+        let rows_before_current = old_rows.saturating_sub(1);
+
+        if rows_before_current > 0 {
+            // clear_last_lines only clears lines before current line and leaves cursor at the
+            // first cleared line, so we must also clear current line explicitly.
+            term.clear_last_lines(rows_before_current)?;
+            term.move_cursor_down(rows_before_current)?;
+        }
+        term.clear_line()?;
+        if rows_before_current > 0 {
+            term.move_cursor_up(rows_before_current)?;
+        }
+
+        term.write_str(PREFIX)?;
+        if !chars.is_empty() {
+            let current: String = chars.iter().collect();
+            term.write_str(&current)?;
+        }
+        term.flush()?;
+        *old_rows = rendered_rows(term, chars);
+        Ok(())
+    }
+
+    let mut chars: Vec<char> = Vec::new();
+    let mut saw_delete_prefix = false;
+    let mut swallow_delete_suffix = false;
+    let mut rows = 1usize;
+
+    term.write_str(PREFIX)?;
+    term.flush()?;
+
+    loop {
+        let key = term.read_key()?;
+        match key {
+            Key::Enter => {
+                term.write_line("")?;
+                break;
+            }
+            Key::Backspace | Key::Del => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = false;
+                if chars.pop().is_some() {
+                    redraw_feedback_line(term, &chars, &mut rows)?;
+                }
+            }
+            // Some terminals split Delete (\x1b[3~) across reads:
+            // UnknownEscSeq(['[']) then '3' then '~'. Treat all these forms as one delete key.
+            // This prevents "cannot fully delete text" when escape sequence arrives in fragments.
+            Key::UnknownEscSeq(seq) if seq.as_slice() == ['[', '3', '~'] => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = false;
+                if chars.pop().is_some() {
+                    redraw_feedback_line(term, &chars, &mut rows)?;
+                }
+            }
+            Key::UnknownEscSeq(seq) if seq.as_slice() == ['[', '3'] => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = true;
+                if chars.pop().is_some() {
+                    redraw_feedback_line(term, &chars, &mut rows)?;
+                }
+            }
+            Key::UnknownEscSeq(seq) if seq.as_slice() == ['['] => {
+                saw_delete_prefix = true;
+                swallow_delete_suffix = false;
+            }
+            Key::Char('3') if saw_delete_prefix => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = true;
+                if chars.pop().is_some() {
+                    redraw_feedback_line(term, &chars, &mut rows)?;
+                }
+            }
+            Key::Char('~') if swallow_delete_suffix => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = false;
+            }
+            Key::Char(ch) if !ch.is_ascii_control() => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = false;
+                chars.push(ch);
+                redraw_feedback_line(term, &chars, &mut rows)?;
+            }
+            _ => {
+                saw_delete_prefix = false;
+                swallow_delete_suffix = false;
+            }
+        }
+    }
+
+    Ok(chars.iter().collect::<String>().trim().to_string())
+}
+
 fn strip_numbering(messages: Vec<String>, count: u8) -> Result<Vec<String>> {
     let cleaned: Vec<String> = messages
         .into_iter()
@@ -211,8 +321,7 @@ fn strip_numbering(messages: Vec<String>, count: u8) -> Result<Vec<String>> {
     Ok(cleaned)
 }
 
-fn generate_via_cli(diff: &str, commits: &str, model: &str, count: u8, timing: bool) -> Result<Vec<String>> {
-    let prompt = build_prompt(diff, commits, count);
+fn generate_via_cli(prompt: &str, model: &str, count: u8, timing: bool) -> Result<Vec<String>> {
     let start = std::time::Instant::now();
 
     let output = Command::new("claude")
@@ -222,7 +331,7 @@ fn generate_via_cli(diff: &str, commits: &str, model: &str, count: u8, timing: b
             model,
             "--no-session-persistence",
             "-p",
-            &prompt,
+            prompt,
         ])
         .output()
         .context("Failed to run claude CLI. Is it installed and in PATH?")?;
@@ -245,13 +354,7 @@ fn generate_via_cli(diff: &str, commits: &str, model: &str, count: u8, timing: b
     strip_numbering(lines, count)
 }
 
-fn generate_via_http(
-    diff: &str,
-    commits: &str,
-    model: &str,
-    count: u8,
-    timing: bool,
-) -> Result<Vec<String>> {
+fn generate_via_http(prompt: &str, model: &str, count: u8, timing: bool) -> Result<Vec<String>> {
     let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
         anyhow::anyhow!(
             "ANTHROPIC_API_KEY is not set\n  Set it with: export ANTHROPIC_API_KEY=sk-ant-..."
@@ -261,7 +364,6 @@ fn generate_via_http(
         .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
 
     let model_id = resolve_model(model);
-    let prompt = build_prompt(diff, commits, count);
     let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
 
     let body = serde_json::json!({
@@ -350,14 +452,58 @@ fn generate_via_http(
     strip_numbering(messages, count)
 }
 
-fn select_message(messages: &[String]) -> Result<String> {
-    let index = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-        .with_prompt("Select a commit message (↑↓ to navigate, Enter to confirm, Esc to cancel)")
-        .items(messages)
-        .default(0)
-        .interact()?;
+fn select_message(messages: &[String]) -> Result<Selection> {
+    const FEEDBACK_LABEL: &str = "↩  None of these — provide feedback...";
 
-    Ok(messages[index].clone())
+    let mut items: Vec<&str> = messages.iter().map(String::as_str).collect();
+    items.push(FEEDBACK_LABEL);
+
+    let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Select a commit message (↑↓ to navigate, Enter to confirm, Esc to cancel)")
+        .items(&items)
+        .default(0)
+        .interact_opt()?;
+
+    match choice {
+        None => Ok(Selection::Cancelled),
+        Some(i) if i < messages.len() => Ok(Selection::Picked(messages[i].clone())),
+        Some(_) => {
+            let term = Term::stderr();
+            // Ensure cursor is visible before taking free-form feedback input.
+            let _ = term.show_cursor();
+            eprintln!("  {}", style("How should the messages be improved?").bold());
+            // Use key-by-key input to keep CJK backspace/delete behavior deterministic.
+            let hint = read_feedback_line(&term)?;
+            if hint.is_empty() {
+                return Ok(Selection::Cancelled);
+            }
+            Ok(Selection::Feedback(hint))
+        }
+    }
+}
+
+fn build_retry_prompt(prev_prompt: &str, previous: &[String], hint: &str) -> String {
+    let suggestions = previous
+        .iter()
+        .enumerate()
+        .map(|(i, m)| format!("{}. {}", i + 1, m))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "{prev_prompt}
+
+---
+
+You previously suggested these messages:
+
+{suggestions}
+
+The user wants to improve them with this feedback: {hint}
+
+Please suggest a fresh set of commit messages that address this feedback. \
+Follow the same output format as before."
+    )
 }
 
 fn commit(message: &str) -> Result<()> {
@@ -378,41 +524,55 @@ fn run(cli: Cli) -> Result<()> {
     let diff = get_staged_diff()?;
     let commits = get_recent_commits()?;
 
-    let messages = if cli.http {
-        eprintln!(
-            "Generating {} commit messages via HTTP ({})...",
-            cli.count,
-            resolve_model(&cli.model)
-        );
-        if cli.verbose {
-            print_verbose(&build_prompt(&diff, &commits, cli.count));
-        }
-        generate_via_http(&diff, &commits, &cli.model, cli.count, cli.timing)?
-    } else {
-        eprintln!(
-            "Generating {} commit messages via claude CLI ({})...",
-            cli.count, cli.model
-        );
-        if cli.verbose {
-            print_verbose(&build_prompt(&diff, &commits, cli.count));
-        }
-        generate_via_cli(&diff, &commits, &cli.model, cli.count, cli.timing)?
-    };
+    let mut prompt = build_prompt(&diff, &commits, cli.count);
 
-    eprintln!();
-
-    if cli.dry_run {
-        for (i, msg) in messages.iter().enumerate() {
-            eprintln!("  {}. {}", i + 1, style(msg).cyan());
+    loop {
+        if cli.verbose {
+            print_verbose(&prompt);
         }
+
+        let messages = if cli.http {
+            eprintln!(
+                "Generating {} commit messages via HTTP ({})...",
+                cli.count,
+                resolve_model(&cli.model)
+            );
+            generate_via_http(&prompt, &cli.model, cli.count, cli.timing)?
+        } else {
+            eprintln!(
+                "Generating {} commit messages via claude CLI ({})...",
+                cli.count, cli.model
+            );
+            generate_via_cli(&prompt, &cli.model, cli.count, cli.timing)?
+        };
+
         eprintln!();
-        return Ok(());
+
+        if cli.dry_run {
+            for (i, msg) in messages.iter().enumerate() {
+                eprintln!("  {}. {}", i + 1, style(msg).cyan());
+            }
+            eprintln!();
+            return Ok(());
+        }
+
+        match select_message(&messages)? {
+            Selection::Picked(msg) => {
+                commit(&msg)?;
+                return Ok(());
+            }
+            Selection::Cancelled => {
+                eprintln!("Cancelled.");
+                return Ok(());
+            }
+            Selection::Feedback(hint) => {
+                eprintln!();
+                eprintln!("Regenerating with your feedback...");
+                prompt = build_retry_prompt(&prompt, &messages, &hint);
+                // loop continues
+            }
+        }
     }
-
-    let selected = select_message(&messages)?;
-    commit(&selected)?;
-
-    Ok(())
 }
 
 fn main() {
