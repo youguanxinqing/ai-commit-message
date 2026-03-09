@@ -456,6 +456,7 @@ fn select_message(messages: &[String]) -> Result<Selection> {
     const FEEDBACK_LABEL: &str = "↩  None of these — provide feedback...";
 
     let mut items: Vec<&str> = messages.iter().map(String::as_str).collect();
+    items.push("");
     items.push(FEEDBACK_LABEL);
 
     let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
