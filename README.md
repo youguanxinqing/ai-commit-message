@@ -52,8 +52,8 @@ ai-commit-message --model sonnet
 Requires an Anthropic API key. Set the environment variables before running:
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...
-export ANTHROPIC_BASE_URL=https://api.anthropic.com  # optional, this is the default
+export AI_COMMIT_MESSAGE_KEY=sk-ant-...
+export AI_COMMIT_MESSAGE_URL=https://api.anthropic.com  # optional, this is the default
 
 ai-commit-message --http
 ai-commit-message --http --model sonnet

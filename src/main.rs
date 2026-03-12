@@ -28,7 +28,7 @@ struct Cli {
     timing: bool,
 
     /// Use direct HTTP API instead of claude CLI.
-    /// Requires ANTHROPIC_API_KEY; ANTHROPIC_BASE_URL defaults to https://api.anthropic.com
+    /// Requires AI_COMMIT_MESSAGE_KEY; AI_COMMIT_MESSAGE_URL defaults to https://api.anthropic.com
     #[arg(long)]
     http: bool,
 
@@ -355,12 +355,12 @@ fn generate_via_cli(prompt: &str, model: &str, count: u8, timing: bool) -> Resul
 }
 
 fn generate_via_http(prompt: &str, model: &str, count: u8, timing: bool) -> Result<Vec<String>> {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+    let api_key = std::env::var("AI_COMMIT_MESSAGE_KEY").map_err(|_| {
         anyhow::anyhow!(
-            "ANTHROPIC_API_KEY is not set\n  Set it with: export ANTHROPIC_API_KEY=sk-ant-..."
+            "AI_COMMIT_MESSAGE_KEY is not set\n  Set it with: export AI_COMMIT_MESSAGE_KEY=sk-ant-..."
         )
     })?;
-    let base_url = std::env::var("ANTHROPIC_BASE_URL")
+    let base_url = std::env::var("AI_COMMIT_MESSAGE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
 
     let model_id = resolve_model(model);
