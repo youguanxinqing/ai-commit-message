@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use dialoguer::console::{Key, Term, measure_text_width, style};
+use dialoguer::console::{Key, Style, Term, measure_text_width, style};
 use std::io::{BufRead, BufReader};
 use std::process::Command;
 
@@ -299,6 +299,109 @@ fn read_feedback_line(term: &Term) -> Result<String> {
     Ok(chars.iter().collect::<String>().trim().to_string())
 }
 
+fn rendered_rows_for_line(term: &Term, line: &str) -> usize {
+    let width = term.size().1.max(1) as usize;
+    let columns = measure_text_width(line).max(1);
+    ((columns - 1) / width) + 1
+}
+
+fn clear_rendered_block(term: &Term, rows: usize) -> Result<()> {
+    if rows > 0 {
+        // Menu rendering uses `write_line`, so cursor always sits on the line after the block.
+        // Clear exactly `rows` lines above current cursor to fully erase prompt + items.
+        term.clear_last_lines(rows)?;
+    }
+    Ok(())
+}
+
+struct CursorGuard<'a> {
+    term: &'a Term,
+}
+
+impl<'a> CursorGuard<'a> {
+    fn hide(term: &'a Term) -> Result<Self> {
+        term.hide_cursor()?;
+        Ok(Self { term })
+    }
+}
+
+impl Drop for CursorGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self.term.show_cursor();
+        let _ = self.term.flush();
+    }
+}
+
+fn render_selection_menu(
+    term: &Term,
+    prompt: &str,
+    items: &[&str],
+    selected: usize,
+) -> Result<usize> {
+    let mut rows = 0usize;
+
+    term.write_line(prompt)?;
+    rows += rendered_rows_for_line(term, prompt);
+
+    for (i, item) in items.iter().enumerate() {
+        let line = if i == selected {
+            format!(
+                "{} {}",
+                style("❯").for_stderr().green(),
+                Style::new().for_stderr().cyan().apply_to(*item)
+            )
+        } else {
+            format!("  {item}")
+        };
+        term.write_line(&line)?;
+        rows += rendered_rows_for_line(term, &line);
+    }
+
+    term.flush()?;
+    Ok(rows)
+}
+
+fn interact_select_with_ctrl_np(
+    term: &Term,
+    prompt: &str,
+    items: &[&str],
+    default: usize,
+) -> Result<Option<usize>> {
+    if items.is_empty() {
+        bail!("Empty list of items given to selector");
+    }
+    if !term.is_term() {
+        bail!("Selection requires a terminal");
+    }
+
+    let mut selected = default.min(items.len() - 1);
+    let mut rows = 0usize;
+    let _cursor = CursorGuard::hide(term)?;
+
+    loop {
+        clear_rendered_block(term, rows)?;
+        rows = render_selection_menu(term, prompt, items, selected)?;
+
+        match term.read_key()? {
+            Key::ArrowDown | Key::Tab | Key::Char('j') | Key::Char('\u{e}') => {
+                selected = (selected + 1) % items.len();
+            }
+            Key::ArrowUp | Key::BackTab | Key::Char('k') | Key::Char('\u{10}') => {
+                selected = (selected + items.len() - 1) % items.len();
+            }
+            Key::Enter | Key::Char(' ') => {
+                clear_rendered_block(term, rows)?;
+                return Ok(Some(selected));
+            }
+            Key::Escape | Key::Char('q') => {
+                clear_rendered_block(term, rows)?;
+                return Ok(None);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn strip_numbering(messages: Vec<String>, count: u8) -> Result<Vec<String>> {
     let cleaned: Vec<String> = messages
         .into_iter()
@@ -459,17 +562,18 @@ fn select_message(messages: &[String]) -> Result<Selection> {
     items.push("");
     items.push(FEEDBACK_LABEL);
 
-    let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-        .with_prompt("Select a commit message (↑↓ to navigate, Enter to confirm, Esc to cancel)")
-        .items(&items)
-        .default(0)
-        .interact_opt()?;
+    let term = Term::stderr();
+    let choice = interact_select_with_ctrl_np(
+        &term,
+        "Select a commit message (↑↓ or Ctrl+N/P to navigate, Enter to confirm, Esc to cancel)",
+        &items,
+        0,
+    )?;
 
     match choice {
         None => Ok(Selection::Cancelled),
         Some(i) if i < messages.len() => Ok(Selection::Picked(messages[i].clone())),
         Some(_) => {
-            let term = Term::stderr();
             // Ensure cursor is visible before taking free-form feedback input.
             let _ = term.show_cursor();
             eprintln!("  {}", style("How should the messages be improved?").bold());

@@ -23,7 +23,7 @@ git add src/auth.rs
 ai-commit-message
 ```
 
-An interactive list of 10 suggested commit messages appears. Use `↑↓` to navigate and `Enter` to commit.
+An interactive list of 10 suggested commit messages appears. Use `↑↓` or `Ctrl+N`/`Ctrl+P` to navigate and `Enter` to commit.
 
 ## Options
 
