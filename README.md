@@ -20,7 +20,7 @@ Stage some files first, then run:
 
 ```sh
 git add src/auth.rs
-ai-commit-message
+ai-commit-message --model haiku
 ```
 
 An interactive list of 10 suggested commit messages appears. Use `↑↓` or `Ctrl+N`/`Ctrl+P` to navigate and `Enter` to commit.
@@ -29,7 +29,7 @@ An interactive list of 10 suggested commit messages appears. Use `↑↓` or `Ct
 
 | Flag | Description |
 |---|---|
-| `-m, --model <MODEL>` | Claude model: `haiku` (default), `sonnet`, `opus`, or a full model ID |
+| `-m, --model <MODEL>` | Claude model: `haiku`, `sonnet`, `opus`, or a full model ID (falls back to `AI_COMMIT_MESSAGE_MODEL`) |
 | `-n, --count <N>` | Number of suggestions to generate (default: `10`) |
 | `--http` | Use the Anthropic HTTP API directly instead of the `claude` CLI |
 | `-d, --dry-run` | Print suggestions without committing |
@@ -43,8 +43,8 @@ An interactive list of 10 suggested commit messages appears. Use `↑↓` or `Ct
 Requires the [`claude`](https://claude.ai/download) CLI to be installed and authenticated.
 
 ```sh
-ai-commit-message
 ai-commit-message --model sonnet
+ai-commit-message --model haiku
 ```
 
 ### HTTP — Direct API
@@ -54,6 +54,7 @@ Requires an Anthropic API key. Set the environment variables before running:
 ```sh
 export AI_COMMIT_MESSAGE_KEY=sk-ant-...
 export AI_COMMIT_MESSAGE_URL=https://api.anthropic.com  # optional, this is the default
+export AI_COMMIT_MESSAGE_MODEL=sonnet  # optional, falls back to --model flag
 
 ai-commit-message --http
 ai-commit-message --http --model sonnet
@@ -61,20 +62,28 @@ ai-commit-message --http --model sonnet
 
 The HTTP backend uses streaming, so responses arrive faster.
 
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `AI_COMMIT_MESSAGE_MODEL` | Default Claude model when `--model` is not specified (e.g., `haiku`, `sonnet`, `opus`) |
+| `AI_COMMIT_MESSAGE_KEY` | Anthropic API key for HTTP backend (required for `--http`) |
+| `AI_COMMIT_MESSAGE_URL` | API URL for HTTP backend (default: `https://api.anthropic.com`) |
+
 ## Examples
 
 ```sh
-# Generate 5 suggestions using the default claude CLI backend
-ai-commit-message -n 5
+# Generate 5 suggestions using Claude CLI backend
+ai-commit-message --model sonnet -n 5
 
 # Use the HTTP backend with Sonnet, print timing info
 ai-commit-message --http --model sonnet --timing
 
 # Preview suggestions without committing
-ai-commit-message --dry-run
+ai-commit-message --model haiku --dry-run
 
 # Print the full prompt to inspect what gets sent to the AI
-ai-commit-message --verbose --dry-run
+ai-commit-message --model sonnet --verbose --dry-run
 ```
 
 ## How it works

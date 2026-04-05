@@ -11,9 +11,9 @@ use std::process::Command;
     version
 )]
 struct Cli {
-    /// Claude model to use
-    #[arg(short, long, default_value = "haiku")]
-    model: String,
+    /// Claude model to use (falls back to AI_COMMIT_MESSAGE_MODEL env var)
+    #[arg(short, long)]
+    model: Option<String>,
 
     /// Number of commit message suggestions to generate
     #[arg(short = 'n', long, default_value_t = 10)]
@@ -625,6 +625,18 @@ fn commit(message: &str) -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    let model = match cli.model {
+        Some(m) => m,
+        None => match std::env::var("AI_COMMIT_MESSAGE_MODEL") {
+            Ok(m) => m.to_string(),
+            Err(_) => {
+                bail!(
+                    "No model specified.\n  Use --model <MODEL> or set AI_COMMIT_MESSAGE_MODEL env var"
+                );
+            }
+        },
+    };
+
     eprintln!("Analyzing staged changes...");
     let diff = get_staged_diff()?;
     let commits = get_recent_commits()?;
@@ -640,15 +652,15 @@ fn run(cli: Cli) -> Result<()> {
             eprintln!(
                 "Generating {} commit messages via HTTP ({})...",
                 cli.count,
-                resolve_model(&cli.model)
+                resolve_model(&model)
             );
-            generate_via_http(&prompt, &cli.model, cli.count, cli.timing)?
+            generate_via_http(&prompt, &model, cli.count, cli.timing)?
         } else {
             eprintln!(
                 "Generating {} commit messages via claude CLI ({})...",
-                cli.count, cli.model
+                cli.count, model
             );
-            generate_via_cli(&prompt, &cli.model, cli.count, cli.timing)?
+            generate_via_cli(&prompt, &model, cli.count, cli.timing)?
         };
 
         eprintln!();
