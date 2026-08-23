@@ -28,6 +28,9 @@ clean:
 release-tag version:
     git tag -a v{{version}} -m "v{{version}}"
     git push origin v{{version}}
-    gh release create v{{version}} --title v{{version}} --generate-notes
-    @echo "sha256:"
-    @curl -sL https://github.com/youguanxinqing/ai-commit-message/archive/refs/tags/v{{version}}.tar.gz | shasum -a 256
+    git archive --format=tar.gz --prefix=ai-commit-message-{{version}}/ \
+        -o ai-commit-message-{{version}}.tar.gz v{{version}}
+    gh release create v{{version}} --title v{{version}} --generate-notes \
+        ai-commit-message-{{version}}.tar.gz
+    shasum -a 256 ai-commit-message-{{version}}.tar.gz
+    rm ai-commit-message-{{version}}.tar.gz
