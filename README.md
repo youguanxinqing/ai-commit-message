@@ -6,6 +6,14 @@ Stage your files, run the command, pick a message, done.
 
 ## Installation
 
+With Homebrew:
+
+```sh
+brew install youguanxinqing/tap/ai-commit-message
+```
+
+Or from source (requires Rust 1.85+):
+
 ```sh
 cargo install --path .
 ```

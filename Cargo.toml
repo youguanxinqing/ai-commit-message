@@ -2,6 +2,11 @@
 name = "ai-commit-message"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Generate Conventional Commits messages from staged changes using Claude AI"
+homepage = "https://github.com/youguanxinqing/ai-commit-message"
+repository = "https://github.com/youguanxinqing/ai-commit-message"
+license = "MIT"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
